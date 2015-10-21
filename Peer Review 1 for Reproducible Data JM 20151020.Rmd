@@ -1,0 +1,181 @@
+---
+title: "Reproducible Research Peer Review 1"
+author: "Jim Maloney"
+date: "October 18, 2015"
+output: html_document
+---
+
+##Introduction
+
+This is an R markdown document for the first project in the Reproducible Research class.
+The project takes fitbit / daily step data recorded at 5 minute intervals over a roughly 2 month period. 
+The introductory step is to read in the data file.
+
+```{r}  
+myfile <- read.csv ('activity.csv',header = TRUE, sep =',')
+library (dplyr,plyr)
+```
+
+-------------------------------------------
+
+##Part I - Daily Activity Levels
+The first part of the assignment is to aggregate and compile data around daily step data.  
+This includes graphing a histogram of the number of steps traveled each day
+as well as a summary of mean and median daily steps taken. 
+
+
+```{r}
+dailysteps <- group_by(myfile,date)
+totaldailysteps <- summarize (dailysteps, Daily = sum(steps, na.rm = TRUE))
+totaldailysteps <- as.data.frame(totaldailysteps)
+
+## create a histogram of the daily step activity
+quicklook <- hist(totaldailysteps$Daily)
+summary (totaldailysteps$Daily)
+meandailysteps <- mean(totaldailysteps$Daily)
+mediandailysteps <- median(totaldailysteps$Daily)
+```
+
+**So from above, we can see that the mean daily steps are 9354 and the median daily steps are 10395.**
+
+---------------------------------------------
+
+##Part II - IntraDay Activity Levels
+
+The second section of the assignment was to look at intraday step patterns. 
+This means we need to group by interval rather than by day and then run similar calculations as per Part I. above.
+The first output will be a time series graph that shows avg steps taken by 5 min interval throughout the day.
+
+```{r}
+intervalsteps <- group_by (myfile,interval)
+avgintervalsteps <- as.data.frame (summarize (intervalsteps, AvgInterval = mean(steps, na.rm = TRUE)))
+
+# graph a time series analysis to get a feel for high/low interval periods
+intervalstepgraph <- plot (avgintervalsteps$interval,avgintervalsteps$AvgInterval, type = 'l')
+```
+
+The next output is to determine the most active interval of the day.  Note that the intervals run in 5 minute increments for each
+hour of the day. 
+
+```{r}
+summary(avgintervalsteps$AvgInterval)
+
+mostactiveinterval <- max(avgintervalsteps$AvgInterval)
+attach(avgintervalsteps)
+topinterval <- avgintervalsteps [AvgInterval == max(AvgInterval), ]
+paste ('The busiest time is at ', topinterval$interval, 'with an average of ',topinterval$AvgInterval, ' steps taken.')
+```
+
+**So from above, we can see that the busiest time is 8:35 am and that on average 206 steps are taken.**
+
+---------------------------------------------
+
+##Part III - Imputing Missing Values
+
+The next part of the exercise is to impute missing values and see how the results from I. and II. change as a result.
+The first thing to do is to determine how many missing items there are.  This will be done through a simple count of NAs.
+
+```{r}
+
+nostepinfo <- sum(is.na(myfile$steps))
+paste ('There are ', nostepinfo, ' missing entries in the dataset.')
+
+```
+
+** This shows 2304 missing entries.**
+
+The next step is to replace missing data elements w/ proxies.  
+While it's not clear what the best option is, I prefer to take the average of the 5 minute interval for the available dates
+and fill in the dataset that way. I believe the potential error here would be less, esp since it appears that intervals
+have higher variance than days.
+
+```{r}
+#imputed dataset - first copy from original data (myfile)
+impdataset <- myfile
+# will first append the average interval step data to the original data file.
+# since every day has the same intervals, this will copy over cleanly
+imputedataset <- cbind(impdataset,avgintervalsteps$AvgInterval)
+
+# will rename the last column avgstepint (average steps per interval)
+names (imputedataset) [4] <- c('avgstepint')
+# check to make sure all looks good
+str(imputedataset)
+# first NAs end around row 288.
+imputedataset[285:335,]
+
+# this is the key step where we update the step data from NA to the avg for that interval.  if not NA, then we leave it as is.
+imputedataset$avgstepint <- ifelse(is.na(imputedataset$steps),imputedataset$avgstepint,imputedataset$steps)
+# check - now should see last column change over from avg to actual step data
+imputedataset [285:335,]
+
+```
+
+Now having created the imputed data set, we will rerun the histogram and recalculate the means/medians etc.
+
+```{r}
+# first the histogram - need to group by day
+
+imputedailysteps <- group_by(imputedataset,date)
+imputedailysteptotal <- summarize (imputedailysteps, Daily= sum(avgstepint))
+imputedailysteptotal <- as.data.frame(imputedailysteptotal)
+imputequicklook <- hist(imputedailysteptotal$Daily)
+
+```
+
+Then to caclualte the means and medians.
+
+```{r}
+summary(imputedailysteptotal$Daily)
+meanimputed <- mean(imputedailysteptotal$Daily)
+medianimputed <- median(imputedailysteptotal$Daily)
+```
+
+**From the above we can see that both the mean and the median daily steps are now 10,770.**
+
+Then to calculate the analysis of difference between observed and imputed data.
+
+```{r}
+
+ImputeLessObservedDailyMean <- meanimputed- meandailysteps
+ImputeLessObservedDailyMedian <- medianimputed -mediandailysteps
+paste('For daily steps taken, the imputed mean is greater than the observed mean by ',ImputeLessObservedDailyMean)
+paste('For daily steps taken, the imputed median is greater than the observed median by ', ImputeLessObservedDailyMedian)
+```
+
+**From this we see the mean has increased more than the median.**
+
+##Part IV. Comparison of Weekday vs. Weekend Daily Activity
+
+The last part of the analysis is to compare average daily steps taken on weekdays vs. weekends, and then see if there is
+a significant difference in intra-day patterns as well.  Will use the imputed data set to produce the charts needed here.
+
+The first chart will be a comparison of daily activity between weekdays and weekends.  
+Need to identify and sort data by weekday/weekend.
+
+```{r}
+# first need to convert date data from factor to date
+imputedataset$date <- as.Date(imputedataset$date)
+# then need to append a column that tells first what day of the week it is
+# then create another column appending whether the day is a weekday or weekend 
+imputedataset$day <- weekdays(imputedataset$date, abbreviate = TRUE)
+imputedataset$daytype <- ifelse(imputedataset$day %in% c("Sat","Sun"),'Day','End')
+# now make a time series graph of each type
+# first step is to group by interval and day type
+weekdaydata <- filter(imputedataset, imputedataset$daytype == 'Day')
+weekenddata <- filter(imputedataset,imputedataset$daytype ==  'End')
+
+#now determine averages for weekday data
+wkdayintervalsteps <- group_by (weekdaydata,interval)
+avgwkdayintervalsteps <- as.data.frame (summarize (wkdayintervalsteps, AvgInterval = mean(avgstepint)))
+# graph a time series analysis to get a feel for high/low interval periods
+wkdayintervalstepgraph <- plot (avgwkdayintervalsteps$interval,avgwkdayintervalsteps$AvgInterval, type = 'l')
+# this shows a graphy where all the activity takes place at 8.30 am with a smallder spike at 5 pm
+
+# now run for weekend data
+wkendintervalsteps <- group_by (weekenddata,interval)
+avgwkendintervalsteps <- as.data.frame (summarize (wkendintervalsteps, AvgInterval = mean(avgstepint)))
+# graph a time series analysis to get a feel for high/low interval periods
+wkendintervalstepgraph <- plot (avgwkendintervalsteps$interval,avgwkendintervalsteps$AvgInterval, type = 'l')
+# this graph shows many more spikes through out the day - starting a bit later, but much higher activity - fitting what
+# intuition would tell us.
+
